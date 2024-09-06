@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    networks:
+      - kafka-network
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      - zookeeper
+    ports:
+      - '9092:9092'
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server=localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    networks:
+      - kafka-network
+
+  plugin-container:
+    build: .
+    environment:
+      KAFKA_BROKER: kafka:9092
+      INPUT_TOPIC: input-topic
+      SUCCESS_TOPIC: success-topic
+      PERMANENT_FAILURE_TOPIC: permanent-failure-topic
+      TRANSIENT_FAILURE_TOPIC: transient-failure-topic
+      GROUP_ID: demo-plugin-group
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - kafka-network
+    command: python app.py  # Replace with the appropriate script
+
+  producer:
+    build: .
+    environment:
+      KAFKA_BROKER: kafka:9092
+      INPUT_TOPIC: input-topic
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - kafka-network
+    command: python producer.py
+
+  transient-failure-consumer:
+    build: .
+    environment:
+      KAFKA_BROKER: kafka:9092
+      INPUT_TOPIC: input-topic
+      TRANSIENT_FAILURE_TOPIC: transient-failure-topic
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - kafka-network
+    command: python transient_failure_consumer.py
+
+  permanent-failure-sink:
+    build: .
+    environment:
+      KAFKA_BROKER: kafka:9092
+      PERMANENT_FAILURE_TOPIC: permanent-failure-topic
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - kafka-network
+    command: python permanent_failure_sink.py
+
+  success-sink:
+    build: .
+    environment:
+      KAFKA_BROKER: kafka:9092
+      SUCCESS_TOPIC: success-topic
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - kafka-network
+    command: python success_sink.py
+
+networks:
+  kafka-network:
+    driver: bridge
